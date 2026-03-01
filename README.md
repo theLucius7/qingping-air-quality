@@ -7,6 +7,15 @@
 
 ---
 
+<p align="center">
+  <img
+    src="https://github.com/user-attachments/assets/f7a35091-ba34-40a5-a66d-9bbaae5d4293"
+    alt="青萍 CGDN1 仪表盘预览"
+  />
+</p>
+
+---
+
 ## ✨ 特色功能
 
 | 功能 | 说明 |
