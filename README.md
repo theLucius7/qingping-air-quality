@@ -1,10 +1,48 @@
 # 青萍 CGDN1 空气质量监测系统
 
-> **检测指标**：PM2.5 · PM10 · CO₂ · 温度 · 湿度  
-> **技术栈**：Cloudflare Workers · KV · Pages  
-> **设备型号**：青萍空气检测仪 CGDN1
+> **零服务器成本**，将青萍 CGDN1 的 PM2.5 / PM10 / CO₂ / 温度 / 湿度数据实时推送并展示——完全运行在 Cloudflare 免费层，无需自建服务器。
+
+[![Cloudflare Workers](https://img.shields.io/badge/Cloudflare-Workers-F38020?logo=cloudflare&logoColor=white)](https://workers.cloudflare.com)
+[![License: MIT](https://img.shields.io/badge/License-MIT-blue.svg)](LICENSE)
 
 ---
+
+## ✨ 特色功能
+
+| 功能 | 说明 |
+|------|------|
+| 🌐 **零服务器** | 全栈运行在 Cloudflare Workers + KV + Pages，免费层足够 1 台设备 24 小时运行 |
+| 🔐 **HMAC-SHA256 验签** | 严格验证青萍平台签名，防止伪造数据写入，支持重放攻击防护 |
+| 📊 **实时仪表盘** | 深色玻璃态 UI，五项指标卡片 + 颜色编码等级 + 历史趋势折线图 |
+| 🔔 **多渠道告警** | 超标自动推送：Server酱（微信）/ 钉钉机器人 / Bark（iOS） |
+| ⏱️ **自动刷新** | 前端每 30 秒拉取最新数据，历史保留最近 24 小时（288 条） |
+| 🔧 **可调阈值** | 告警阈值通过环境变量覆盖，无需改代码重部署 |
+
+---
+
+## ⚡ 快速部署（5 步）
+
+```bash
+# 1. 创建 KV 并把 id 填入 wrangler.toml
+cd worker && npx wrangler kv:namespace create AIR_DATA
+
+# 2. 部署 Worker，拿到 Worker URL
+npx wrangler deploy
+
+# 3. 配置青萍 App Secret（权限管理 → 权限申请页面获取）
+npx wrangler secret put QINGPING_APP_SECRET
+
+# 4. 把 Worker URL 填入 frontend/index.html 第一行 WORKER_URL，然后 push 到 GitHub
+#    → Cloudflare Pages 连接 GitHub 仓库，输出目录填 frontend，自动部署
+
+# 5. 青萍开发者平台 → 权限管理 → 数据推送设置 → 填写 Webhook 地址
+#    https://你的Worker地址/webhook
+```
+
+> 首次部署约需 10 分钟。完成后等设备下次上报（默认 1 小时，可用 Open API 改为 5 分钟）即可看到数据。
+
+---
+
 
 ## 目录
 
