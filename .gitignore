@@ -1,0 +1,14 @@
+# Wrangler / Node
+node_modules/
+.wrangler/
+dist/
+.dev.vars
+
+# OS
+.DS_Store
+Thumbs.db
+
+# Editor
+.vscode/
+.idea/
+*.swp

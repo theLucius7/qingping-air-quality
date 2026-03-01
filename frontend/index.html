@@ -1,0 +1,807 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>室内空气质量 · 青萍 CGDN1</title>
+  <meta name="description" content="青萍 CGDN1 实时空气质量监测 — PM2.5、PM10、CO₂、温度、湿度">
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link
+    href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&family=JetBrains+Mono:wght@400;500&display=swap"
+    rel="stylesheet">
+  <script src="https://cdn.jsdelivr.net/npm/chart.js@4/dist/chart.umd.min.js"></script>
+  <style>
+    /* ── Reset & Base ── */
+    *,
+    *::before,
+    *::after {
+      box-sizing: border-box;
+      margin: 0;
+      padding: 0;
+    }
+
+    :root {
+      --bg: #06080f;
+      --bg2: #0c1120;
+      --glass: rgba(255, 255, 255, 0.042);
+      --glass-b: rgba(255, 255, 255, 0.08);
+      --border: rgba(255, 255, 255, 0.08);
+      --border-h: rgba(255, 255, 255, 0.16);
+      --text: #e8eaf0;
+      --text-mute: #5a6080;
+      --text-dim: #8890a8;
+      --accent: #6c8aff;
+
+      --c-good: #34d399;
+      --c-mid: #facc15;
+      --c-warn: #f97316;
+      --c-bad: #ef4444;
+      --c-cold: #60a5fa;
+      --c-humid: #818cf8;
+
+      --radius: 1.1rem;
+      --card-p: 1.4rem 1.6rem;
+    }
+
+    html {
+      scroll-behavior: smooth;
+    }
+
+    body {
+      font-family: 'Inter', system-ui, sans-serif;
+      background: var(--bg);
+      color: var(--text);
+      min-height: 100vh;
+      overflow-x: hidden;
+    }
+
+    /* ── Ambient background blobs ── */
+    body::before,
+    body::after {
+      content: '';
+      position: fixed;
+      border-radius: 50%;
+      filter: blur(120px);
+      pointer-events: none;
+      z-index: 0;
+    }
+
+    body::before {
+      width: 600px;
+      height: 600px;
+      background: radial-gradient(circle, rgba(108, 138, 255, 0.12) 0%, transparent 70%);
+      top: -200px;
+      left: -200px;
+      animation: blobA 14s ease-in-out infinite alternate;
+    }
+
+    body::after {
+      width: 500px;
+      height: 500px;
+      background: radial-gradient(circle, rgba(52, 211, 153, 0.09) 0%, transparent 70%);
+      bottom: -150px;
+      right: -150px;
+      animation: blobB 18s ease-in-out infinite alternate;
+    }
+
+    @keyframes blobA {
+      from {
+        transform: translate(0, 0) scale(1);
+      }
+
+      to {
+        transform: translate(80px, 60px) scale(1.15);
+      }
+    }
+
+    @keyframes blobB {
+      from {
+        transform: translate(0, 0) scale(1);
+      }
+
+      to {
+        transform: translate(-60px, -80px) scale(1.2);
+      }
+    }
+
+    /* ── Layout ── */
+    .page {
+      position: relative;
+      z-index: 1;
+      max-width: 900px;
+      margin: 0 auto;
+      padding: 2rem 1.25rem 4rem;
+    }
+
+    /* ── Header ── */
+    .header {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      margin-bottom: 2.2rem;
+      flex-wrap: wrap;
+      gap: 0.75rem;
+    }
+
+    .header-left {
+      display: flex;
+      align-items: center;
+      gap: 0.9rem;
+    }
+
+    .logo-dot {
+      width: 10px;
+      height: 10px;
+      border-radius: 50%;
+      background: var(--c-good);
+      box-shadow: 0 0 0 3px rgba(52, 211, 153, 0.18);
+      animation: pulse 2.4s ease-in-out infinite;
+    }
+
+    @keyframes pulse {
+
+      0%,
+      100% {
+        box-shadow: 0 0 0 3px rgba(52, 211, 153, 0.18);
+      }
+
+      50% {
+        box-shadow: 0 0 0 7px rgba(52, 211, 153, 0.06);
+      }
+    }
+
+    .logo-dot.offline {
+      background: var(--text-mute);
+      box-shadow: none;
+      animation: none;
+    }
+
+    h1 {
+      font-size: 1.1rem;
+      font-weight: 600;
+      letter-spacing: -0.01em;
+    }
+
+    .device-tag {
+      font-size: 0.7rem;
+      font-weight: 500;
+      letter-spacing: 0.04em;
+      padding: 0.25rem 0.55rem;
+      border-radius: 100px;
+      background: rgba(108, 138, 255, 0.12);
+      color: var(--accent);
+      border: 1px solid rgba(108, 138, 255, 0.22);
+      text-transform: uppercase;
+    }
+
+    .update-txt {
+      font-size: 0.72rem;
+      color: var(--text-mute);
+    }
+
+    /* ── AQI 总览横幅 ── */
+    .aqi-banner {
+      background: var(--glass);
+      border: 1px solid var(--border);
+      border-radius: var(--radius);
+      padding: 1.3rem 1.8rem;
+      margin-bottom: 1.4rem;
+      display: flex;
+      align-items: center;
+      gap: 1.5rem;
+      flex-wrap: wrap;
+      backdrop-filter: blur(14px);
+      transition: border-color .3s;
+    }
+
+    .aqi-banner:hover {
+      border-color: var(--border-h);
+    }
+
+    .aqi-label {
+      font-size: 0.72rem;
+      color: var(--text-mute);
+      text-transform: uppercase;
+      letter-spacing: .08em;
+      margin-bottom: .2rem;
+    }
+
+    .aqi-value {
+      font-size: 2.8rem;
+      font-weight: 700;
+      font-family: 'JetBrains Mono', monospace;
+      line-height: 1;
+    }
+
+    .aqi-divider {
+      width: 1px;
+      height: 48px;
+      background: var(--border);
+      flex-shrink: 0;
+    }
+
+    .aqi-desc {
+      flex: 1;
+    }
+
+    .aqi-level {
+      font-size: 1rem;
+      font-weight: 600;
+      margin-bottom: .2rem;
+    }
+
+    .aqi-advice {
+      font-size: 0.78rem;
+      color: var(--text-dim);
+    }
+
+    /* ── 五项指标网格 ── */
+    .metrics-grid {
+      display: grid;
+      grid-template-columns: repeat(auto-fill, minmax(155px, 1fr));
+      gap: 1rem;
+      margin-bottom: 1.4rem;
+    }
+
+    .metric-card {
+      background: var(--glass);
+      border: 1px solid var(--border);
+      border-radius: var(--radius);
+      padding: var(--card-p);
+      cursor: default;
+      transition: border-color .25s, transform .25s, box-shadow .25s;
+      backdrop-filter: blur(14px);
+      position: relative;
+      overflow: hidden;
+    }
+
+    .metric-card::before {
+      content: '';
+      position: absolute;
+      inset: 0;
+      border-radius: inherit;
+      background: var(--card-glow, transparent);
+      opacity: 0;
+      transition: opacity .3s;
+      pointer-events: none;
+    }
+
+    .metric-card:hover {
+      border-color: var(--border-h);
+      transform: translateY(-2px);
+      box-shadow: 0 12px 36px rgba(0, 0, 0, .35);
+    }
+
+    .metric-card:hover::before {
+      opacity: 1;
+    }
+
+    .metric-icon {
+      font-size: 1.1rem;
+      margin-bottom: .5rem;
+      opacity: .8;
+    }
+
+    .metric-label {
+      font-size: 0.65rem;
+      font-weight: 500;
+      color: var(--text-mute);
+      text-transform: uppercase;
+      letter-spacing: .1em;
+      margin-bottom: .5rem;
+    }
+
+    .metric-val {
+      font-size: 2.1rem;
+      font-weight: 700;
+      font-family: 'JetBrains Mono', monospace;
+      line-height: 1.1;
+      margin-bottom: .4rem;
+      transition: color .5s;
+    }
+
+    .metric-unit {
+      font-size: 0.7rem;
+      font-weight: 400;
+      opacity: .6;
+      margin-left: .15rem;
+    }
+
+    .metric-badge {
+      display: inline-block;
+      font-size: 0.68rem;
+      font-weight: 500;
+      padding: .2rem .55rem;
+      border-radius: 100px;
+      border: 1px solid transparent;
+      transition: background .5s, color .5s, border-color .5s;
+    }
+
+    .metric-progress {
+      margin-top: .75rem;
+      height: 2px;
+      border-radius: 2px;
+      background: rgba(255, 255, 255, .07);
+      overflow: hidden;
+    }
+
+    .metric-progress-bar {
+      height: 100%;
+      border-radius: 2px;
+      transition: width .8s cubic-bezier(.4, 0, .2, 1), background .5s;
+    }
+
+    /* ── 图表区 ── */
+    .chart-card {
+      background: var(--glass);
+      border: 1px solid var(--border);
+      border-radius: var(--radius);
+      padding: 1.5rem 1.6rem;
+      backdrop-filter: blur(14px);
+      margin-bottom: 1.4rem;
+      transition: border-color .3s;
+    }
+
+    .chart-card:hover {
+      border-color: var(--border-h);
+    }
+
+    .chart-header {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      flex-wrap: wrap;
+      gap: .75rem;
+      margin-bottom: 1.2rem;
+    }
+
+    .chart-title {
+      font-size: .85rem;
+      font-weight: 600;
+    }
+
+    .tab-bar {
+      display: flex;
+      gap: .4rem;
+      flex-wrap: wrap;
+    }
+
+    .tab-btn {
+      font-size: 0.7rem;
+      font-weight: 500;
+      padding: .3rem .75rem;
+      border-radius: 100px;
+      border: 1px solid var(--border);
+      background: transparent;
+      color: var(--text-dim);
+      cursor: pointer;
+      transition: all .2s;
+      font-family: inherit;
+    }
+
+    .tab-btn:hover {
+      border-color: var(--border-h);
+      color: var(--text);
+    }
+
+    .tab-btn.active {
+      background: rgba(255, 255, 255, .1);
+      border-color: rgba(255, 255, 255, .22);
+      color: #fff;
+    }
+
+    .chart-wrap {
+      position: relative;
+      height: 180px;
+    }
+
+    /* ── 状态栏 ── */
+    .status-bar {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      flex-wrap: wrap;
+      gap: .5rem;
+      font-size: 0.7rem;
+      color: var(--text-mute);
+      padding: .9rem 1.1rem;
+      background: var(--glass);
+      border: 1px solid var(--border);
+      border-radius: var(--radius);
+      backdrop-filter: blur(10px);
+    }
+
+    .status-bar a {
+      color: var(--text-dim);
+      text-decoration: none;
+    }
+
+    .status-bar a:hover {
+      color: var(--text);
+    }
+
+    .refresh-btn {
+      font-size: 0.7rem;
+      font-weight: 500;
+      padding: .25rem .7rem;
+      border-radius: 100px;
+      border: 1px solid var(--border);
+      background: transparent;
+      color: var(--text-dim);
+      cursor: pointer;
+      transition: all .2s;
+      font-family: inherit;
+    }
+
+    .refresh-btn:hover {
+      border-color: var(--border-h);
+      color: var(--text);
+    }
+
+    /* ── loading skeleton ── */
+    .skeleton {
+      background: linear-gradient(90deg, rgba(255, 255, 255, .04) 25%, rgba(255, 255, 255, .09) 50%, rgba(255, 255, 255, .04) 75%);
+      background-size: 200% 100%;
+      animation: shimmer 1.6s infinite;
+      border-radius: .3rem;
+      color: transparent !important;
+      user-select: none;
+    }
+
+    @keyframes shimmer {
+      from {
+        background-position: 200% 0;
+      }
+
+      to {
+        background-position: -200% 0;
+      }
+    }
+
+    /* ── Responsive ── */
+    @media (max-width: 520px) {
+      .aqi-banner {
+        flex-direction: column;
+        gap: .75rem;
+      }
+
+      .aqi-divider {
+        width: 100%;
+        height: 1px;
+      }
+
+      .metrics-grid {
+        grid-template-columns: 1fr 1fr;
+      }
+    }
+  </style>
+</head>
+
+<body>
+  <div class="page">
+
+    <!-- 标题栏 -->
+    <header class="header">
+      <div class="header-left">
+        <div class="logo-dot" id="statusDot"></div>
+        <h1>室内空气质量</h1>
+        <span class="device-tag">CGDN1</span>
+      </div>
+      <span class="update-txt" id="updateText">正在加载数据…</span>
+    </header>
+
+    <!-- AQI 总览 -->
+    <div class="aqi-banner" id="aqiBanner">
+      <div>
+        <div class="aqi-label">空气质量</div>
+        <div class="aqi-value skeleton" id="aqiVal" style="min-width:80px">--</div>
+      </div>
+      <div class="aqi-divider"></div>
+      <div class="aqi-desc">
+        <div class="aqi-level skeleton" id="aqiLevel" style="min-width:60px">--</div>
+        <div class="aqi-advice" id="aqiAdvice">正在获取数据</div>
+      </div>
+    </div>
+
+    <!-- 五项指标卡片 -->
+    <div class="metrics-grid" id="metricsGrid">
+      <!-- 由 JS 生成 -->
+    </div>
+
+    <!-- 历史曲线 -->
+    <div class="chart-card">
+      <div class="chart-header">
+        <div class="chart-title">历史趋势</div>
+        <div class="tab-bar" id="tabBar"></div>
+      </div>
+      <div class="chart-wrap">
+        <canvas id="lineChart"></canvas>
+      </div>
+    </div>
+
+    <!-- 状态栏 -->
+    <div class="status-bar">
+      <span>每 30 秒自动刷新 · 青萍 CGDN1 · Cloudflare Workers + KV · <a
+          href="https://github.com/theLucius7/qingping-air-quality" target="_blank" rel="noopener">GitHub</a></span>
+      <div style="display:flex;gap:.5rem;align-items:center;">
+        <span id="autoRefreshCountdown">30s</span>
+        <button class="refresh-btn" onclick="App.refresh()">立即刷新</button>
+      </div>
+    </div>
+
+  </div>
+
+  <script>
+    // ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+    // ★ 唯一需要修改的配置 ★
+    // ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+    const WORKER_URL = 'https://air-quality-worker.lucius7.dev';
+    // ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+    const METRICS_DEF = [
+      {
+        key: 'pm25', label: 'PM 2.5', unit: 'µg/m³', icon: '💨',
+        max: 200,
+        grades: [[12, '优', '#34d399', '良好空气，可放心开窗'],
+        [35, '良', '#a3e635', '轻微污染，敏感人群注意'],
+        [75, '轻污染', '#facc15', '佩戴口罩建议'],
+        [150, '中污染', '#f97316', '减少户外活动'],
+        [Infinity, '重污染', '#ef4444', '请关窗净化']]
+      },
+      {
+        key: 'pm10', label: 'PM 10', unit: 'µg/m³', icon: '🌫️',
+        max: 300,
+        grades: [[54, '优', '#34d399', '颗粒物较少，空气清新'],
+        [154, '良', '#facc15', '可接受水平'],
+        [Infinity, '污染', '#ef4444', '颗粒物较多，注意防护']]
+      },
+      {
+        key: 'co2', label: 'CO₂', unit: 'ppm', icon: '🍃',
+        max: 2500,
+        grades: [[600, '优', '#34d399', '新鲜空气，浓度极低'],
+        [800, '良', '#a3e635', '室内正常水平'],
+        [1000, '偏高', '#facc15', '建议适当通风'],
+        [1500, '过高', '#f97316', '立即通风换气'],
+        [Infinity, '危险', '#ef4444', '紧急通风！']]
+      },
+      {
+        key: 'temp', label: '温度', unit: '°C', icon: '🌡️',
+        max: 45,
+        grades: [[15, '偏冷', '#60a5fa', '适当增温'],
+        [18, '偏凉', '#818cf8', '可增添衣物'],
+        [26, '舒适', '#34d399', '温度适宜，感觉舒适'],
+        [32, '偏热', '#facc15', '注意降温'],
+        [Infinity, '过热', '#ef4444', '请开启空调/风扇']]
+      },
+      {
+        key: 'humi', label: '湿度', unit: '%', icon: '💧',
+        max: 100,
+        grades: [[30, '干燥', '#60a5fa', '建议加湿'],
+        [40, '偏干', '#818cf8', '略显干燥'],
+        [70, '舒适', '#34d399', '湿度适宜，感觉舒适'],
+        [Infinity, '偏湿', '#a78bfa', '建议除湿']]
+      },
+    ];
+
+    const CHART_COLORS = {
+      pm25: '#f97316', pm10: '#facc15', co2: '#60a5fa', temp: '#fb7185', humi: '#34d399'
+    };
+
+    function getGrade(metricDef, value) {
+      if (value == null) return { level: '无数据', color: '#4a5080', advice: '等待设备上报' };
+      for (const [threshold, level, color, advice] of metricDef.grades) {
+        if (value <= threshold) return { level, color, advice };
+      }
+      return { level: '未知', color: '#888', advice: '' };
+    }
+
+    // ── 渲染五项卡片 ──
+    function renderMetricCards(data) {
+      const grid = document.getElementById('metricsGrid');
+      grid.innerHTML = '';
+
+      METRICS_DEF.forEach(def => {
+        const val = data[def.key];
+        const grade = getGrade(def, val);
+        const pct = val != null ? Math.min(val / def.max * 100, 100) : 0;
+
+        const card = document.createElement('div');
+        card.className = 'metric-card';
+        card.id = `card-${def.key}`;
+        card.style.setProperty('--card-glow',
+          `radial-gradient(ellipse at top left, ${grade.color}10, transparent 60%)`);
+
+        card.innerHTML = `
+      <div class="metric-icon">${def.icon}</div>
+      <div class="metric-label">${def.label}</div>
+      <div class="metric-val" style="color:${grade.color}">
+        ${val != null ? val : '--'}<span class="metric-unit">${def.unit}</span>
+      </div>
+      <span class="metric-badge"
+        style="background:${grade.color}1a;color:${grade.color};border-color:${grade.color}33">
+        ${grade.level}
+      </span>
+      <div class="metric-progress">
+        <div class="metric-progress-bar"
+          style="width:${pct}%;background:${grade.color}"></div>
+      </div>`;
+
+        grid.appendChild(card);
+      });
+    }
+
+    // ── 渲染 AQI 总览 ──
+    function renderAQI(data) {
+      const pm25 = data.pm25;
+      const grade = getGrade(METRICS_DEF[0], pm25);
+      document.getElementById('aqiVal').textContent = pm25 != null ? pm25 : '--';
+      document.getElementById('aqiVal').style.color = grade.color;
+      document.getElementById('aqiVal').className = 'aqi-value';
+      document.getElementById('aqiLevel').textContent = `PM2.5 ${grade.level}`;
+      document.getElementById('aqiLevel').style.color = grade.color;
+      document.getElementById('aqiLevel').className = 'aqi-level';
+      document.getElementById('aqiAdvice').textContent = grade.advice;
+    }
+
+    // ── Chart.js 实例 ──
+    let chartInstance = null;
+    let activeKey = 'pm25';
+    let historyData = [];
+
+    function renderChart() {
+      const def = METRICS_DEF.find(d => d.key === activeKey);
+      const color = CHART_COLORS[activeKey];
+      const labels = historyData.map(d => {
+        const t = new Date(d.ts);
+        return t.getHours().toString().padStart(2, '0') + ':' +
+          t.getMinutes().toString().padStart(2, '0');
+      });
+      const values = historyData.map(d => d[activeKey]);
+
+      if (chartInstance) chartInstance.destroy();
+
+      const ctx = document.getElementById('lineChart').getContext('2d');
+
+      const gradient = ctx.createLinearGradient(0, 0, 0, 180);
+      gradient.addColorStop(0, color + '30');
+      gradient.addColorStop(1, color + '02');
+
+      chartInstance = new Chart(ctx, {
+        type: 'line',
+        data: {
+          labels,
+          datasets: [{
+            data: values,
+            borderColor: color,
+            backgroundColor: gradient,
+            borderWidth: 1.8,
+            pointRadius: 0,
+            pointHoverRadius: 4,
+            pointHoverBackgroundColor: color,
+            fill: true,
+            tension: 0.45,
+            spanGaps: true,
+          }]
+        },
+        options: {
+          responsive: true,
+          maintainAspectRatio: false,
+          animation: { duration: 500, easing: 'easeInOutQuart' },
+          interaction: { mode: 'index', intersect: false },
+          plugins: {
+            legend: { display: false },
+            tooltip: {
+              backgroundColor: '#111827',
+              titleColor: '#9ca3af',
+              bodyColor: color,
+              borderColor: 'rgba(255,255,255,.1)',
+              borderWidth: 1,
+              callbacks: {
+                label: ctx => ` ${ctx.parsed.y} ${def.unit}`,
+              }
+            }
+          },
+          scales: {
+            x: {
+              ticks: { color: '#4a5070', maxTicksLimit: 8, font: { size: 10, family: 'JetBrains Mono' } },
+              grid: { color: 'rgba(255,255,255,0.035)' },
+              border: { color: 'rgba(255,255,255,0.06)' },
+            },
+            y: {
+              ticks: { color: '#4a5070', font: { size: 10, family: 'JetBrains Mono' } },
+              grid: { color: 'rgba(255,255,255,0.035)' },
+              border: { color: 'rgba(255,255,255,0.06)' },
+            },
+          },
+        }
+      });
+    }
+
+    // ── Tab 按钮 ──
+    function buildTabs() {
+      const bar = document.getElementById('tabBar');
+      METRICS_DEF.forEach(def => {
+        const btn = document.createElement('button');
+        btn.className = 'tab-btn' + (def.key === activeKey ? ' active' : '');
+        btn.textContent = def.label;
+        btn.onclick = () => {
+          activeKey = def.key;
+          document.querySelectorAll('.tab-btn').forEach(b => b.classList.remove('active'));
+          btn.classList.add('active');
+          renderChart();
+        };
+        bar.appendChild(btn);
+      });
+    }
+
+    // ── 主 App ──
+    const App = {
+      countdown: 30,
+      timer: null,
+      cdTimer: null,
+
+      async fetchLatest() {
+        try {
+          const r = await fetch(`${WORKER_URL}/api/latest`);
+          if (!r.ok) throw new Error(r.statusText);
+          const data = await r.json();
+          renderAQI(data);
+          renderMetricCards(data);
+
+          const dot = document.getElementById('statusDot');
+          dot.classList.remove('offline');
+
+          if (data.ts) {
+            const t = new Date(data.ts);
+            document.getElementById('updateText').textContent =
+              '更新于 ' + t.toLocaleTimeString('zh-CN');
+          }
+        } catch (e) {
+          console.error('fetchLatest error:', e);
+          document.getElementById('statusDot').classList.add('offline');
+          document.getElementById('updateText').textContent = '数据获取失败';
+        }
+      },
+
+      async fetchHistory() {
+        try {
+          const r = await fetch(`${WORKER_URL}/api/history?n=48`);
+          if (!r.ok) throw new Error(r.statusText);
+          historyData = await r.json();
+          renderChart();
+        } catch (e) {
+          console.error('fetchHistory error:', e);
+        }
+      },
+
+      refresh() {
+        this.fetchLatest();
+        this.fetchHistory();
+        this.countdown = 30;
+        document.getElementById('autoRefreshCountdown').textContent = '30s';
+      },
+
+      startAutoRefresh() {
+        this.timer = setInterval(() => this.refresh(), 30000);
+        this.cdTimer = setInterval(() => {
+          this.countdown--;
+          if (this.countdown < 0) this.countdown = 30;
+          document.getElementById('autoRefreshCountdown').textContent = this.countdown + 's';
+        }, 1000);
+      },
+
+      async init() {
+        buildTabs();
+        await this.fetchLatest();
+        await this.fetchHistory();
+        this.startAutoRefresh();
+      }
+    };
+
+    App.init();
+  </script>
+</body>
+
+</html>

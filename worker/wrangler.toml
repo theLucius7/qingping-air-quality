@@ -1,0 +1,21 @@
+name = "air-quality-worker"
+main = "src/index.js"
+compatibility_date = "2025-01-01"
+
+[[kv_namespaces]]
+binding = "AIR_DATA"
+id = "a4091e87370f45238ee81a62d8aa811e"
+# preview_id = "替换为你的KV_PREVIEW_ID"  # 本地 dev 调试用
+
+[vars]
+# 可选：在此处设置非敏感变量
+# 敏感密钥请通过 wrangler secret put 或 Dashboard 设置
+
+# 告警阈值配置（可自定义）
+PM25_THRESHOLD = "75"
+PM10_THRESHOLD = "150"
+CO2_THRESHOLD  = "1500"
+TEMP_THRESHOLD = "32"
+
+# 历史记录最大条数（默认 288 = 每5分钟一条 × 24小时）
+HISTORY_MAX = "288"

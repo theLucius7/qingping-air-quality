@@ -1,0 +1,334 @@
+# 青萍 CGDN1 空气质量监测系统
+
+> **检测指标**：PM2.5 · PM10 · CO₂ · 温度 · 湿度  
+> **技术栈**：Cloudflare Workers · KV · Pages  
+> **设备型号**：青萍空气检测仪 CGDN1
+
+---
+
+## 目录
+
+1. [项目结构](#项目结构)
+2. [部署步骤](#部署步骤)
+3. [设置设备上报频率](#设置设备上报频率open-api)
+4. [配置青萍 Webhook](#配置青萍-webhook)
+5. [API 接口说明](#api-接口说明)
+6. [Webhook 数据格式](#webhook-数据格式)
+7. [告警推送配置](#告警推送配置)
+8. [Cloudflare 免费配额用量](#cloudflare-免费配额用量)
+9. [常见问题排查](#常见问题排查)
+
+---
+
+## 项目结构
+
+```
+qingping/
+├── README.md
+├── worker/
+│   ├── wrangler.toml          ← Worker 配置（KV 绑定、阈值变量）
+│   ├── package.json
+│   └── src/
+│       └── index.js           ← Worker 后端主逻辑
+└── frontend/
+    └── index.html             ← 单文件前端，部署到 Cloudflare Pages
+```
+
+---
+
+## 部署步骤
+
+### 前提条件
+
+- Node.js 18+（用于运行 Wrangler）
+- Cloudflare 账号（免费即可）
+- 青萍开发者平台账号：[developer.qingping.co](https://developer.qingping.co)
+
+### 第一步：安装 Wrangler 并登录
+
+```bash
+npm install -g wrangler
+wrangler login
+```
+
+### 第二步：创建 KV 命名空间
+
+```bash
+cd worker
+npx wrangler kv:namespace create AIR_DATA
+```
+
+把输出的 `id` 填入 `wrangler.toml`：
+
+```toml
+[[kv_namespaces]]
+binding = "AIR_DATA"
+id = "xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx"   # ← 替换为实际 ID
+```
+
+### 第三步：部署 Worker
+
+```bash
+cd worker
+npm install
+npx wrangler deploy
+```
+
+部署成功后获得 Worker 地址，例如：
+```
+https://air-quality-worker.xxx.workers.dev
+```
+
+可绑定自定义域名（如 `air-quality-worker.lucius7.dev`）：在 Cloudflare Dashboard → Workers → 当前 Worker → Settings → Domains & Routes 添加。
+
+### 第四步：配置签名密钥和告警
+
+在青萍开发者平台的**权限管理 → 权限申请**页面找到 App Secret，然后：
+
+```bash
+# 必填：青萍 App Secret（用于验证 Webhook 签名）
+npx wrangler secret put QINGPING_APP_SECRET
+
+# 可选：告警推送渠道（三选一或叠加）
+npx wrangler secret put SERVERCHAN_KEY     # Server酱（微信）
+npx wrangler secret put DINGTALK_WEBHOOK   # 钉钉群机器人 Webhook URL
+npx wrangler secret put BARK_KEY           # Bark iOS 推送
+
+# 可选：管理接口鉴权（用于 DELETE /api/history）
+npx wrangler secret put ADMIN_SECRET
+```
+
+> ⚠️ **注意**：`QINGPING_APP_SECRET` 必须填写，否则 Webhook 会返回 401 拒绝青萍平台的推送。
+
+### 第五步：修改前端 Worker 地址
+
+打开 `frontend/index.html`，找到第一行配置并替换：
+
+```js
+const WORKER_URL = 'https://air-quality-worker.xxx.workers.dev'; // ← 改为你的 Worker 地址
+```
+
+### 第六步：部署前端到 Cloudflare Pages
+
+1. 将整个 `qingping/` 目录推送到 GitHub
+2. 在 Cloudflare Dashboard → Pages → 创建项目 → 连接 GitHub 仓库
+3. 配置如下：
+   - **框架预设**：无
+   - **构建命令**：（留空）
+   - **输出目录**：`frontend`
+4. 保存部署，获得 Pages 地址（可绑定自定义域名）
+
+---
+
+## 设置设备上报频率（Open API）
+
+> 青萍平台界面没有上报频率设置，需要通过 Open API 调用修改。
+
+**默认上报间隔为 3600 秒（1 小时），建议改为 300 秒（5 分钟）。**
+
+所需信息（在青萍平台**权限管理 → 权限申请**页面获取）：
+- App Key（如 `6FO_ePOvg`）
+- App Secret（如 `0ae7f78c...`）
+- 设备 MAC（如 `CCB5D131CE1D`，在**私有化 → 下发私有配置**页面查看）
+
+### PowerShell 一键执行
+
+```powershell
+# === 填入你的信息 ===
+$appKey    = "你的AppKey"
+$appSecret = "你的AppSecret"
+$deviceMac = "你的设备MAC"
+# ====================
+
+# Step 1: 获取 OAuth Token（必须用 Basic Auth）
+$authBase64 = [Convert]::ToBase64String(
+  [System.Text.Encoding]::UTF8.GetBytes("${appKey}:${appSecret}")
+)
+$r = Invoke-RestMethod -Method POST `
+  -Uri "https://oauth.cleargrass.com/oauth2/token" `
+  -Headers @{ Authorization = "Basic $authBase64" } `
+  -ContentType "application/x-www-form-urlencoded" `
+  -Body "grant_type=client_credentials&scope=device_full_access"
+$token = $r.access_token
+Write-Host "✅ Token 获取成功"
+
+# Step 2: 设置上报间隔（timestamp 必须是 13 位毫秒时间戳）
+$body = @{
+  mac              = @($deviceMac)
+  report_interval  = 300   # 上报周期：秒（最小 60）
+  collect_interval = 60    # 采集周期：秒
+  timestamp        = [DateTimeOffset]::UtcNow.ToUnixTimeMilliseconds()
+} | ConvertTo-Json
+
+Invoke-RestMethod -Method PUT `
+  -Uri "https://apis.cleargrass.com/v1/apis/devices/settings" `
+  -Headers @{ Authorization = "Bearer $token"; "Content-Type" = "application/json" } `
+  -Body $body
+
+Write-Host "✅ 上报间隔已设为 5 分钟"
+```
+
+> **重要**：  
+> - Token 请求必须在 Header 中使用 `Authorization: Basic Base64(AppKey:AppSecret)`，不能放在 Body 里  
+> - `timestamp` 必须是 **13 位毫秒时间戳**，且在请求时间 20 秒内有效
+
+---
+
+## 配置青萍 Webhook
+
+### 配置路径
+
+青萍开发者平台 → **权限管理 → 数据推送设置 → Webhook 设置**
+
+### 填写地址
+
+| 类型 | 地址 |
+|------|------|
+| 设备数据接收地址 | `https://你的Worker地址/webhook` |
+| 设备事件接收地址 | `https://你的Worker地址/webhook`（同一个接口同时处理） |
+
+### 平台推送规则
+
+- 响应时间：**3 秒内必须返回 200**
+- 失败重试：5、15、30 分钟后各重试一次，共 3 次
+- 熔断机制：超时率超 50% 触发熔断，暂停 10 分钟
+
+---
+
+## API 接口说明
+
+| 方法 | 路径 | 说明 |
+|------|------|------|
+| `POST` | `/webhook` | 接收青萍设备推送（含签名验证） |
+| `GET`  | `/api/latest` | 获取最新一条数据 |
+| `GET`  | `/api/history?n=48` | 获取最近 n 条历史（默认 48，最大 288） |
+| `POST` | `/api/test` | 写入随机模拟数据（调试用） |
+| `GET`  | `/health` | Worker 健康检查 |
+| `DELETE` | `/api/history?secret=xxx` | 清空全部数据（需要 ADMIN_SECRET） |
+
+---
+
+## Webhook 数据格式
+
+Worker 自动识别青萍官方格式，字段路径如下：
+
+```
+body
+├── signature
+│   ├── signature   HMAC-SHA256 签名（用 App Secret 验证）
+│   ├── timestamp   Unix 时间戳（秒）
+│   └── token       随机字符串
+└── payload
+    ├── info
+    │   ├── mac     设备 MAC 地址
+    │   └── name    设备名称
+    ├── metadata
+    │   └── data_type   "realtime" 或 "history"
+    └── data[]          数组，取最后一条
+        ├── pm25        { value: float }
+        ├── pm10        { value: float }
+        ├── co2         { value: float }
+        ├── temperature { value: float }
+        ├── humidity    { value: float }
+        ├── battery     { value: float }
+        └── timestamp   { value: int }  ← Unix 秒
+```
+
+### 签名验证逻辑
+
+```
+HMAC-SHA256( timestamp + token, AppSecret ) == signature
+```
+
+Worker 同时检查时间窗口（±5 分钟），防止重放攻击。未设置 `QINGPING_APP_SECRET` 时自动跳过验签（开发调试用）。
+
+---
+
+## 告警推送配置
+
+### 默认告警阈值
+
+| 指标 | 默认阈值 | 自定义环境变量 |
+|------|---------|--------------|
+| PM2.5 | > 75 µg/m³ | `PM25_THRESHOLD` |
+| PM10  | > 150 µg/m³ | `PM10_THRESHOLD` |
+| CO₂   | > 1500 ppm | `CO2_THRESHOLD` |
+| 温度  | > 32 °C | `TEMP_THRESHOLD` |
+
+在 `wrangler.toml` 的 `[vars]` 中修改，无需重新 deploy secrets。
+
+### 推送渠道
+
+| 渠道 | Secret 名称 | 说明 |
+|------|------------|------|
+| Server酱 | `SERVERCHAN_KEY` | 推送到微信，[sct.ftqq.com](https://sct.ftqq.com) 获取 |
+| 钉钉机器人 | `DINGTALK_WEBHOOK` | 钉钉群机器人的完整 Webhook URL |
+| Bark | `BARK_KEY` | iOS 原生推送，Bark App 内获取 key |
+
+---
+
+## Cloudflare 免费配额用量
+
+> 基于：1 台设备，5 分钟上报一次，1 个前端标签页常开（30 秒刷新）
+
+| 资源 | 每天用量 | 免费限额 | 使用率 |
+|------|---------|---------|--------|
+| Worker 请求 | ~6,000 次 | 100,000 次 | **6%** ✅ |
+| KV 写入 | ~576 次 | 1,000 次 | **57.6%** ⚠️ |
+| KV 读取 | ~6,000 次 | 100,000 次 | **6%** ✅ |
+| KV 存储 | ~86 KB | 1 GB | **0.01%** ✅ |
+
+> **KV 写入说明**：每次 Webhook 写 2 次（`latest` + `history`）。  
+> 若未来添加第二台设备（576 × 2 = 1,152 次），将超出免费限额。  
+> 届时可将两次写入合并为一次，支持的设备数量直接翻倍。
+
+---
+
+## 常见问题排查
+
+### Webhook 返回 401
+
+`QINGPING_APP_SECRET` 与青萍平台的 App Secret 不匹配。
+
+```bash
+npx wrangler secret put QINGPING_APP_SECRET
+# 输入青萍平台「权限管理 → 权限申请」页面显示的 App Secret
+```
+
+### 前端显示"数据获取失败"
+
+检查 `frontend/index.html` 中的 `WORKER_URL` 是否与实际部署地址一致：
+
+```js
+const WORKER_URL = 'https://你的Worker地址';
+```
+
+修改后需要重新 push 触发 Pages 重新部署。
+
+### 数据迟迟不更新
+
+1. 用 `wrangler tail` 查看 Worker 实时日志，确认是否有请求进来
+2. 检查设备是否连接 Wi-Fi 并绑定到青萍开发者账号
+3. 用 API 确认上报间隔是否已改短：当前默认 1 小时，建议改为 5 分钟（见上方 Open API 部分）
+
+### 本地调试
+
+```bash
+cd worker
+npx wrangler dev
+
+# 另开终端写入模拟数据
+curl -X POST http://localhost:8787/api/test
+
+# 查看最新数据
+curl http://localhost:8787/api/latest
+```
+
+### 实时监控 Worker 日志
+
+```bash
+cd worker
+npx wrangler tail
+```
+
+青萍每次推送时会输出 `POST /webhook 200 OK`，可以实时确认数据是否到达。

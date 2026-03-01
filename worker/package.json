@@ -1,0 +1,14 @@
+{
+  "name": "air-quality-worker",
+  "version": "1.0.0",
+  "description": "Cloudflare Worker for Qingping CGDN1 air quality monitor",
+  "main": "src/index.js",
+  "scripts": {
+    "dev": "wrangler dev",
+    "deploy": "wrangler deploy",
+    "tail": "wrangler tail"
+  },
+  "devDependencies": {
+    "wrangler": "^3.0.0"
+  }
+}
